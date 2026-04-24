@@ -1,0 +1,90 @@
+# Docker Compose for InfraVersionHub
+# Local development environment with Frontend, Backend, and MongoDB
+
+version: '3.8'
+
+services:
+  # Frontend service (React)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        - VITE_API_URL=/v1
+    container_name: infraversionhub-frontend
+    ports:
+      - "3000:8080"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - infraversionhub-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Backend service (FastAPI)
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: infraversionhub-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - LOG_LEVEL=INFO
+      - STORAGE_BACKEND=mongodb
+      - MONGODB_URL=mongodb://admin:admin@mongodb:27017
+      - MONGODB_DATABASE=infraversionhub
+      - JWT_SECRET=${JWT_SECRET:-development-secret-change-in-production}
+      - JWT_ALGORITHM=HS256
+      - JWT_EXPIRATION_HOURS=24
+      - CORS_ORIGINS=http://localhost:3000,http://localhost:8080
+      - ENVIRONMENT=development
+    volumes:
+      - ./backend/src:/app/src:ro
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    networks:
+      - infraversionhub-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # MongoDB service
+  mongodb:
+    image: mongo:7
+    container_name: infraversionhub-mongodb
+    ports:
+      - "27017:27017"
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=admin
+      - MONGO_INITDB_ROOT_PASSWORD=admin
+      - MONGO_INITDB_DATABASE=infraversionhub
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - infraversionhub-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  mongodb_data:
+    driver: local
+
+networks:
+  infraversionhub-network:
+    driver: bridge
